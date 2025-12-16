@@ -1,0 +1,5 @@
+
+{
+  "name": "Academic Indexing System",
+  "description": "An intelligent system for semantic extraction and search of academic papers using the Gemini API. Users can upload documents, have metadata automatically extracted, verify the data, and perform semantic searches on the indexed collection."
+}
