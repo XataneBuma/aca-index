@@ -1,4 +1,5 @@
 
+
 export interface AcademicWork {
   id: number;
   titulo: string;
@@ -11,9 +12,19 @@ export interface AcademicWork {
   supervisor: string;
   coSupervisor: string;
   resumo: string;
+  relevanceScore?: number;
+  keywords?: KeywordScore[];
+  entities?: Record<string, string[]>;
+  similarDocuments?: AcademicWork[];
+  pdfUrl?: string;
 }
 
-export type ExtractedData = Omit<AcademicWork, 'id'>;
+export interface KeywordScore {
+  keyword: string;
+  score: number;
+}
+
+export type ExtractedData = Omit<AcademicWork, 'id' | 'relevanceScore' | 'keywords' | 'entities' | 'similarDocuments' | 'pdfUrl'>;
 
 export type UploadState = 'idle' | 'processing' | 'verifying' | 'submitting' | 'success';
 

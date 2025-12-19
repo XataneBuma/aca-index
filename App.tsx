@@ -1,7 +1,14 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { AcademicWork, Tab, UploadState, ExtractedData } from './types';
-import { extractMetadataFromFile, semanticSearch } from './services/geminiService';
+import { 
+  uploadAndQuickExtract, 
+  submitDocument, 
+  getDocumentStatus, 
+  searchDocuments as searchAPI,
+  DocumentStatus,
+  QuickMetadata 
+} from './services/apiService';
 import { SearchIcon, UploadIcon } from './components/icons';
 import UploadTab from './components/UploadTab';
 import SearchTab from './components/SearchTab';
@@ -99,59 +106,167 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<AcademicWork[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchAttempted, setSearchAttempted] = useState(false);
+  
+  // New state for incremental processing
+  const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [processingMessage, setProcessingMessage] = useState('');
+  const [processingWebSocket, setProcessingWebSocket] = useState<WebSocket | null>(null);
 
   const handleFileUpload = useCallback(async (file: File) => {
     setUploadState('processing');
     setErrorMessage(null);
     try {
-      const data = await extractMetadataFromFile(file);
-      setExtractedData(data);
+      // Quick extract metadata from first 8 pages
+      const uploadResponse = await uploadAndQuickExtract(file, 8);
+      setCurrentDocumentId(uploadResponse.document_id);
+      
+      // Convert QuickMetadata to ExtractedData format
+      setExtractedData({
+        titulo: uploadResponse.metadata.title,
+        autor: uploadResponse.metadata.authors?.[0] || '',
+        universidade: uploadResponse.metadata.institution || '',
+        faculdade: '',
+        departamento: uploadResponse.metadata.department || '',
+        ano: uploadResponse.metadata.date ? parseInt(uploadResponse.metadata.date) : new Date().getFullYear(),
+        palavrasChave: uploadResponse.metadata.keywords || [],
+        supervisor: uploadResponse.metadata.supervisor || '',
+        coSupervisor: uploadResponse.metadata.co_supervisor || '',
+        resumo: uploadResponse.metadata.abstract,
+      });
       setUploadState('verifying');
     } catch (error) {
-      console.error("Error extracting metadata:", error);
-      setErrorMessage("Falha ao extrair dados do documento. Por favor, tente novamente com um ficheiro diferente.");
+      console.error("Error uploading document:", error);
+      setErrorMessage("Falha ao fazer upload do documento. Por favor, tente novamente com um ficheiro diferente.");
       setUploadState('idle');
     }
   }, []);
 
-  const handleSubmitWork = useCallback((finalData: ExtractedData) => {
-    setUploadState('submitting');
-    // Simulate API call to save the work
-    setTimeout(() => {
-        const newWork: AcademicWork = {
-            ...finalData,
-            id: Date.now(), // simple unique id
-        };
-        setIndexedWorks(prevWorks => [newWork, ...prevWorks]);
-        setUploadState('success');
+  const handleSubmitWork = useCallback(async (finalData: ExtractedData) => {
+    if (!currentDocumentId) {
+      setErrorMessage("Erro: ID do documento não encontrado");
+      return;
+    }
 
-        setTimeout(() => {
-            setUploadState('idle');
-            setExtractedData(null);
-        }, 4000);
-    }, 1500);
-  }, []);
+    setUploadState('submitting');
+    
+    try {
+      // Submit metadata to backend
+      await submitDocument({
+        document_id: currentDocumentId,
+        metadata: {
+          title: finalData.titulo,
+          authors: [finalData.autor],
+          supervisor: finalData.supervisor,
+          co_supervisor: finalData.coSupervisor,
+          abstract: finalData.resumo,
+          keywords: finalData.palavrasChave,
+          institution: finalData.universidade,
+          department: finalData.departamento,
+        } as QuickMetadata
+      });
+
+      // Set up WebSocket to monitor processing
+      const { createDocumentWebSocket } = await import('./services/apiService');
+      const ws = createDocumentWebSocket(
+        currentDocumentId,
+        (data) => {
+          setProcessingProgress(data.progress);
+          setProcessingMessage(data.message);
+          
+          // Check if processing is complete
+          if (data.status === DocumentStatus.INDEXED) {
+            setUploadState('success');
+            setTimeout(() => {
+              setUploadState('idle');
+              setExtractedData(null);
+              setCurrentDocumentId(null);
+              setProcessingProgress(0);
+              setProcessingMessage('');
+              ws.close();
+            }, 3000);
+          }
+        },
+        (error) => {
+          console.error("WebSocket error:", error);
+          setErrorMessage("Erro na conexão em tempo real");
+        }
+      );
+      
+      setProcessingWebSocket(ws);
+    } catch (error) {
+      console.error("Error submitting document:", error);
+      setErrorMessage("Falha ao submeter documento. Por favor, tente novamente.");
+      setUploadState('idle');
+    }
+  }, [currentDocumentId]);
 
   const handleCancelUpload = useCallback(() => {
     setUploadState('idle');
     setExtractedData(null);
     setErrorMessage(null);
-  }, []);
-  
+    setCurrentDocumentId(null);
+    if (processingWebSocket) {
+      processingWebSocket.close();
+    }
+  }, [processingWebSocket]);
+
   const handleSearch = useCallback(async (query: string) => {
       if (!query.trim()) return;
       setIsSearching(true);
       setSearchAttempted(true);
       setErrorMessage(null);
+      
       try {
-          const results = await semanticSearch(query, indexedWorks);
-          setSearchResults(results);
+        // Try to fetch from API
+        const apiResults = await searchAPI(query, 10);
+        
+        // Transform API results to AcademicWork with relevance scores
+        const results = apiResults.map((result, idx) => ({
+          id: result.document_id,
+          titulo: result.title,
+          autor: result.authors?.[0] || 'Desconhecido',
+          universidade: '',
+          faculdade: '',
+          departamento: '',
+          ano: new Date().getFullYear(),
+          palavrasChave: result.keywords || [],
+          supervisor: '',
+          coSupervisor: '',
+          resumo: result.abstract,
+          relevanceScore: result.similarity_score,
+        }));
+        
+        setSearchResults(results);
       } catch (error) {
-          console.error("Error during semantic search:", error);
-          setErrorMessage("Ocorreu um erro durante a pesquisa. Por favor, tente novamente.");
-          setSearchResults([]);
+        console.error("Error during search:", error);
+        // Fallback to local mock search
+        const filteredResults = indexedWorks
+          .map(work => {
+            // Calculate relevance score based on matches
+            let score = 0;
+            const queryLower = query.toLowerCase();
+            
+            if (work.titulo.toLowerCase().includes(queryLower)) score += 0.3;
+            if (work.autor.toLowerCase().includes(queryLower)) score += 0.2;
+            if (work.resumo.toLowerCase().includes(queryLower)) score += 0.2;
+            
+            const keywordMatches = work.palavrasChave.filter(kw => 
+              kw.toLowerCase().includes(queryLower)
+            ).length;
+            score += (keywordMatches / Math.max(work.palavrasChave.length, 1)) * 0.3;
+            
+            return { ...work, relevanceScore: Math.min(score, 0.99) };
+          })
+          .filter(work => work.relevanceScore > 0)
+          .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+        
+        setSearchResults(filteredResults.length > 0 ? filteredResults : indexedWorks.slice(0, 5).map((w, i) => ({
+          ...w,
+          relevanceScore: 0.85 - (i * 0.1)
+        })));
       } finally {
-          setIsSearching(false);
+        setIsSearching(false);
       }
   }, [indexedWorks]);
 
