@@ -8,6 +8,8 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: {
+          '/cache': 'https://vividly-delegable-tula.ngrok-free.dev'}
       },
       plugins: [react()],
       define: {

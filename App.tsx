@@ -1,6 +1,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { AcademicWork, Tab, UploadState, ExtractedData } from './types';
+import CacheTab from './components/CacheTab';
 import { 
   uploadAndQuickExtract, 
   submitDocument, 
@@ -91,11 +92,22 @@ const Tabs: React.FC<TabsProps> = ({ activeTab, setActiveTab }) => (
               <SearchIcon size={20} />
               Pesquisar Trabalhos
             </button>
+            <button
+            onClick={() => setActiveTab('cache')}
+            className={`py-4 px-2 border-b-2 font-medium transition flex items-center gap-2 ${
+              activeTab === 'cache'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Gerenciar Cache
+          </button>
+
           </div>
         </div>
       </div>
 );
-
+export type Tab = 'upload' | 'search' | 'cache';
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('upload');
   const [uploadState, setUploadState] = useState<UploadState>('idle');
@@ -295,7 +307,13 @@ export default function App() {
             searchAttempted={searchAttempted}
           />
         )}
+        {activeTab === 'cache' && (
+          <CacheTab apiUrl="https://vividly-delegable-tula.ngrok-free.dev"/>
+        )}
+        
       </main>
+      
     </div>
+    
   );
 }
