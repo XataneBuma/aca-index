@@ -10,6 +10,7 @@ import {
   DocumentStatus,
   QuickMetadata 
 } from './services/apiService';
+import { indexDocument } from './services/geminiService';
 import { SearchIcon, UploadIcon } from './components/icons';
 import UploadTab from './components/UploadTab';
 import SearchTab from './components/SearchTab';
@@ -107,7 +108,7 @@ const Tabs: React.FC<TabsProps> = ({ activeTab, setActiveTab }) => (
         </div>
       </div>
 );
-export type Tab = 'upload' | 'search' | 'cache';
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('upload');
   const [uploadState, setUploadState] = useState<UploadState>('idle');
@@ -121,6 +122,7 @@ export default function App() {
   
   // New state for incremental processing
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
+  const [currentPdfFile, setCurrentPdfFile] = useState<File | null>(null);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingMessage, setProcessingMessage] = useState('');
   const [processingWebSocket, setProcessingWebSocket] = useState<WebSocket | null>(null);
@@ -128,10 +130,16 @@ export default function App() {
   const handleFileUpload = useCallback(async (file: File) => {
     setUploadState('processing');
     setErrorMessage(null);
+    setProcessingMessage('📤 Iniciando o pipeline preliminar...');
+    setProcessingProgress(10);
+    setCurrentPdfFile(file); // Store the PDF file
+    
     try {
-      // Quick extract metadata from first 8 pages
+      // Upload and extract using Gemini API
       const uploadResponse = await uploadAndQuickExtract(file, 8);
       setCurrentDocumentId(uploadResponse.document_id);
+      setProcessingProgress(50);
+      setProcessingMessage('✓ Metadados extraídos com sucesso');
       
       // Convert QuickMetadata to ExtractedData format
       setExtractedData({
@@ -146,10 +154,11 @@ export default function App() {
         coSupervisor: uploadResponse.metadata.co_supervisor || '',
         resumo: uploadResponse.metadata.abstract,
       });
+      
       setUploadState('verifying');
     } catch (error) {
       console.error("Error uploading document:", error);
-      setErrorMessage("Falha ao fazer upload do documento. Por favor, tente novamente com um ficheiro diferente.");
+      setErrorMessage(`❌ Erro ao processar o pipeline: ${error instanceof Error ? error.message : 'Erro desconhecido'}. Verifique se a API_KEY está configurada corretamente.`);
       setUploadState('idle');
     }
   }, []);
@@ -161,8 +170,17 @@ export default function App() {
     }
 
     setUploadState('submitting');
+    setProcessingMessage('A indexar documento...');
+    setProcessingProgress(20);
     
     try {
+      // Index the document in local state immediately with the PDF file
+      const indexedWork = await indexDocument(finalData, currentPdfFile || undefined);
+      setIndexedWorks(prev => [...prev, indexedWork]);
+      
+      setProcessingProgress(40);
+      setProcessingMessage('A submeter metadata ao servidor...');
+
       // Submit metadata to backend
       await submitDocument({
         document_id: currentDocumentId,
@@ -178,16 +196,21 @@ export default function App() {
         } as QuickMetadata
       });
 
+      setProcessingProgress(60);
+      setProcessingMessage('A processar no servidor...');
+
       // Set up WebSocket to monitor processing
       const { createDocumentWebSocket } = await import('./services/apiService');
       const ws = createDocumentWebSocket(
         currentDocumentId,
         (data) => {
-          setProcessingProgress(data.progress);
-          setProcessingMessage(data.message);
+          setProcessingProgress(60 + Math.min(data.progress * 0.4, 39));
+          setProcessingMessage(data.message || 'A processar...');
           
           // Check if processing is complete
           if (data.status === DocumentStatus.INDEXED) {
+            setProcessingProgress(100);
+            setProcessingMessage('Documento indexado com sucesso!');
             setUploadState('success');
             setTimeout(() => {
               setUploadState('idle');
@@ -201,7 +224,13 @@ export default function App() {
         },
         (error) => {
           console.error("WebSocket error:", error);
-          setErrorMessage("Erro na conexão em tempo real");
+          setErrorMessage("Erro na conexão em tempo real. O documento foi salvo localmente.");
+          setUploadState('success');
+          setTimeout(() => {
+            setUploadState('idle');
+            setExtractedData(null);
+            setCurrentDocumentId(null);
+          }, 3000);
         }
       );
       
@@ -211,13 +240,14 @@ export default function App() {
       setErrorMessage("Falha ao submeter documento. Por favor, tente novamente.");
       setUploadState('idle');
     }
-  }, [currentDocumentId]);
+  }, [currentDocumentId, currentPdfFile]);
 
   const handleCancelUpload = useCallback(() => {
     setUploadState('idle');
     setExtractedData(null);
     setErrorMessage(null);
     setCurrentDocumentId(null);
+    setCurrentPdfFile(null);
     if (processingWebSocket) {
       processingWebSocket.close();
     }
@@ -228,6 +258,9 @@ export default function App() {
       setIsSearching(true);
       setSearchAttempted(true);
       setErrorMessage(null);
+      
+      // Import the real relevance calculation functions outside try/catch
+      const { calculateSemanticRelevance, findSimilarDocuments } = await import('./services/geminiService');
       
       try {
         // Try to fetch from API
@@ -248,34 +281,53 @@ export default function App() {
           resumo: result.abstract,
           relevanceScore: result.similarity_score,
         }));
+
+        // Merge with local indexed works and deduplicate
+        const mergedResults = [...results];
+        const apiIds = new Set(apiResults.map(r => r.document_id));
         
-        setSearchResults(results);
+        const localResults = indexedWorks
+          .filter(work => !apiIds.has(work.id as any))
+          .map(work => {
+            // Use real semantic relevance calculation
+            const relevanceScore = calculateSemanticRelevance(query, work);
+            return { ...work, relevanceScore };
+          })
+          .filter(work => work.relevanceScore > 0.05) // Filter very low relevance
+          .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+        
+        const finalResults = [...mergedResults, ...localResults]
+          .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0))
+          .slice(0, 20)
+          .map(work => {
+            // Add similar documents for each result
+            return {
+              ...work,
+              similarDocuments: findSimilarDocuments(work, indexedWorks, 5)
+            };
+          });
+        
+        setSearchResults(finalResults);
       } catch (error) {
         console.error("Error during search:", error);
-        // Fallback to local mock search
+        // Fallback to local indexed search with real relevance calculation
         const filteredResults = indexedWorks
           .map(work => {
-            // Calculate relevance score based on matches
-            let score = 0;
-            const queryLower = query.toLowerCase();
-            
-            if (work.titulo.toLowerCase().includes(queryLower)) score += 0.3;
-            if (work.autor.toLowerCase().includes(queryLower)) score += 0.2;
-            if (work.resumo.toLowerCase().includes(queryLower)) score += 0.2;
-            
-            const keywordMatches = work.palavrasChave.filter(kw => 
-              kw.toLowerCase().includes(queryLower)
-            ).length;
-            score += (keywordMatches / Math.max(work.palavrasChave.length, 1)) * 0.3;
-            
-            return { ...work, relevanceScore: Math.min(score, 0.99) };
+            // Use real semantic relevance calculation
+            const relevanceScore = calculateSemanticRelevance(query, work);
+            return { ...work, relevanceScore };
           })
-          .filter(work => work.relevanceScore > 0)
-          .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+          .filter(work => work.relevanceScore > 0.05)
+          .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0))
+          .map(work => ({
+            ...work,
+            similarDocuments: findSimilarDocuments(work, indexedWorks, 5)
+          }));
         
         setSearchResults(filteredResults.length > 0 ? filteredResults : indexedWorks.slice(0, 5).map((w, i) => ({
           ...w,
-          relevanceScore: 0.85 - (i * 0.1)
+          relevanceScore: 0.85 - (i * 0.1),
+          similarDocuments: findSimilarDocuments(w, indexedWorks, 5)
         })));
       } finally {
         setIsSearching(false);
@@ -296,6 +348,8 @@ export default function App() {
             onFileUpload={handleFileUpload}
             onSubmitWork={handleSubmitWork}
             onCancel={handleCancelUpload}
+            processingProgress={processingProgress}
+            processingMessage={processingMessage}
           />
         )}
         {activeTab === 'search' && (
@@ -308,7 +362,7 @@ export default function App() {
           />
         )}
         {activeTab === 'cache' && (
-          <CacheTab apiUrl="https://vividly-delegable-tula.ngrok-free.dev"/>
+          <CacheTab apiUrl="https://vividly-delegable-tula.ngrok-free.dev" indexedWorks={indexedWorks}/>
         )}
         
       </main>

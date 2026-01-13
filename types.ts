@@ -17,6 +17,9 @@ export interface AcademicWork {
   entities?: Record<string, string[]>;
   similarDocuments?: AcademicWork[];
   pdfUrl?: string;
+  pdfFile?: File | Blob;
+  indexed?: boolean;
+  indexedAt?: string;
 }
 
 export interface KeywordScore {
@@ -24,8 +27,8 @@ export interface KeywordScore {
   score: number;
 }
 
-export type ExtractedData = Omit<AcademicWork, 'id' | 'relevanceScore' | 'keywords' | 'entities' | 'similarDocuments' | 'pdfUrl'>;
+export type ExtractedData = Omit<AcademicWork, 'id' | 'relevanceScore' | 'keywords' | 'entities' | 'similarDocuments' | 'pdfUrl' | 'indexed' | 'indexedAt'>;
 
 export type UploadState = 'idle' | 'processing' | 'verifying' | 'submitting' | 'success';
 
-export type Tab = 'upload' | 'search';
+export type Tab = 'upload' | 'search' | 'cache';

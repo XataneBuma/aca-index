@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import type { AcademicWork } from '../types';
 import { SearchIcon, QuoteIcon, FileTextIcon, DownloadIcon } from './icons';
+import PDFViewer from './PDFViewer';
 
 interface SearchTabProps {
   onSearch: (query: string) => void;
@@ -310,11 +311,19 @@ const WorkDetailsModal: React.FC<{ work: AcademicWork, onClose: () => void, onCi
                     {activeTab === 'pdf' && (
                         <div className="space-y-4">
                             <h3 className="text-lg font-semibold text-gray-900">Pré-visualização de PDF</h3>
-                            {work.pdfUrl ? (
-                                <iframe
-                                    src={work.pdfUrl}
-                                    className="w-full h-96 rounded-lg border border-gray-200"
-                                    title="PDF Preview"
+                            {work.pdfFile ? (
+                                <PDFViewer 
+                                    file={work.pdfFile}
+                                    height="600px"
+                                    onLoadSuccess={(numPages) => console.log(`PDF loaded with ${numPages} pages`)}
+                                    onLoadError={(error) => console.error('PDF load error:', error)}
+                                />
+                            ) : work.pdfUrl ? (
+                                <PDFViewer 
+                                    file={work.pdfUrl}
+                                    height="600px"
+                                    onLoadSuccess={(numPages) => console.log(`PDF loaded with ${numPages} pages`)}
+                                    onLoadError={(error) => console.error('PDF load error:', error)}
                                 />
                             ) : (
                                 <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">

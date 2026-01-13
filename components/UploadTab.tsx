@@ -10,6 +10,8 @@ interface UploadTabProps {
   onFileUpload: (file: File) => void;
   onSubmitWork: (data: ExtractedData) => void;
   onCancel: () => void;
+  processingProgress?: number;
+  processingMessage?: string;
 }
 
 const IdleView: React.FC<{ onFileUpload: (file: File) => void }> = ({ onFileUpload }) => {
@@ -33,11 +35,61 @@ const IdleView: React.FC<{ onFileUpload: (file: File) => void }> = ({ onFileUplo
   );
 };
 
-const ProcessingView: React.FC<{ text: string }> = ({ text }) => (
-  <div className="bg-white rounded-lg shadow-md p-12 text-center">
-    <ClockIcon className="inline animate-spin text-indigo-600 mb-4" size={48} />
-    <h3 className="text-xl font-semibold text-gray-900 mt-4 mb-2">{text}</h3>
-    <p className="text-gray-600">O sistema está a realizar leitura e extração semântica de dados. Isso pode levar um momento.</p>
+const ProcessingView: React.FC<{ text: string, progress?: number, message?: string }> = ({ text, progress = 0, message }) => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-lg shadow-md p-12 text-center">
+      <ClockIcon className="inline animate-spin text-indigo-600 mb-4" size={48} />
+      <h3 className="text-xl font-semibold text-gray-900 mt-4 mb-2">{text}</h3>
+      <p className="text-gray-600">{message || 'O sistema está a realizar leitura e extração semântica de dados. Isso pode levar um momento.'}</p>
+    </div>
+    
+    {progress > 0 && (
+      <div className="bg-white rounded-lg shadow-md p-6">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-semibold text-gray-700">Progresso</span>
+          <span className="text-sm font-bold text-indigo-600">{progress}%</span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-3">
+          <div 
+            className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-3 rounded-full transition-all duration-300"
+            style={{ width: `${progress}%` }}
+          ></div>
+        </div>
+      </div>
+    )}
+    
+    {/* Status Cards */}
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className={`rounded-lg p-4 flex items-center gap-3 ${progress >= 20 ? 'bg-green-50' : 'bg-gray-50'}`}>
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ${progress >= 20 ? 'bg-green-500' : 'bg-gray-300'}`}>
+          {progress >= 20 ? '✓' : '1'}
+        </div>
+        <div className="text-sm">
+          <div className="font-semibold text-gray-900">Upload</div>
+          <div className="text-xs text-gray-600">{progress >= 20 ? 'Concluído' : 'Em progresso'}</div>
+        </div>
+      </div>
+      
+      <div className={`rounded-lg p-4 flex items-center gap-3 ${progress >= 50 ? 'bg-green-50' : progress >= 20 ? 'bg-blue-50' : 'bg-gray-50'}`}>
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ${progress >= 50 ? 'bg-green-500' : progress >= 20 ? 'bg-blue-500' : 'bg-gray-300'}`}>
+          {progress >= 50 ? '✓' : '2'}
+        </div>
+        <div className="text-sm">
+          <div className="font-semibold text-gray-900">Indexação</div>
+          <div className="text-xs text-gray-600">{progress >= 50 ? 'Concluído' : progress >= 20 ? 'Em progresso' : 'Pendente'}</div>
+        </div>
+      </div>
+      
+      <div className={`rounded-lg p-4 flex items-center gap-3 ${progress >= 100 ? 'bg-green-50' : progress >= 50 ? 'bg-blue-50' : 'bg-gray-50'}`}>
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ${progress >= 100 ? 'bg-green-500' : progress >= 50 ? 'bg-blue-500' : 'bg-gray-300'}`}>
+          {progress >= 100 ? '✓' : '3'}
+        </div>
+        <div className="text-sm">
+          <div className="font-semibold text-gray-900">Finalização</div>
+          <div className="text-xs text-gray-600">{progress >= 100 ? 'Concluído' : progress >= 50 ? 'Em progresso' : 'Pendente'}</div>
+        </div>
+      </div>
+    </div>
   </div>
 );
 
@@ -89,7 +141,7 @@ const VerificationForm: React.FC<{
         <FileTextIcon className="text-blue-600" size={24} />
         <div>
           <h3 className="font-semibold text-blue-900">Ficha de Verificação</h3>
-          <p className="text-sm text-blue-800">Verifique e corrija os dados extraídos pelo modelo de IA.</p>
+          <p className="text-sm text-blue-800">Verifique e corrija os dados extraídos preliminarmente.</p>
         </div>
       </div>
 
@@ -145,6 +197,8 @@ const UploadTab: React.FC<UploadTabProps> = ({
   onFileUpload,
   onSubmitWork,
   onCancel,
+  processingProgress = 0,
+  processingMessage = '',
 }) => {
   return (
     <div className="space-y-8">
@@ -155,11 +209,11 @@ const UploadTab: React.FC<UploadTabProps> = ({
         </div>
       )}
       {uploadState === 'idle' && <IdleView onFileUpload={onFileUpload} />}
-      {uploadState === 'processing' && <ProcessingView text="A processar documento..." />}
+      {uploadState === 'processing' && <ProcessingView text="A processar documento..." progress={processingProgress} message={processingMessage} />}
       {uploadState === 'verifying' && extractedData && (
         <VerificationForm initialData={extractedData} onSubmit={onSubmitWork} onCancel={onCancel} />
       )}
-      {uploadState === 'submitting' && <ProcessingView text="A submeter trabalho..." />}
+      {uploadState === 'submitting' && <ProcessingView text="A submeter trabalho..." progress={processingProgress} message={processingMessage} />}
       {uploadState === 'success' && <SuccessView />}
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileTextIcon, DownloadIcon, SearchIcon } from './icons';
+import type { AcademicWork } from '../types';
 
 // ==================== TIPOS ====================
 
@@ -21,6 +22,7 @@ interface CacheStats {
 
 interface CacheTabProps {
   apiUrl: string;
+  indexedWorks?: AcademicWork[];
 }
 
 // ==================== COMPONENTES ====================
@@ -289,13 +291,14 @@ const DocumentDetailsModal: React.FC<{
 
 // ==================== COMPONENTE PRINCIPAL ====================
 
-const CacheTab: React.FC<CacheTabProps> = ({ apiUrl }) => {
+const CacheTab: React.FC<CacheTabProps> = ({ apiUrl, indexedWorks = [] }) => {
   const [stats, setStats] = useState<CacheStats | null>(null);
   const [documents, setDocuments] = useState<CachedDocument[]>([]);
   const [filteredDocs, setFilteredDocs] = useState<CachedDocument[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'cache' | 'indexed'>('cache');
 
   // Carrega dados iniciais
   useEffect(() => {
@@ -418,10 +421,47 @@ const CacheTab: React.FC<CacheTabProps> = ({ apiUrl }) => {
     );
   }
 
+  // Filter indexed works by search term
+  const filteredIndexedWorks = indexedWorks.filter(work => {
+    if (!searchTerm) return true;
+    const term = searchTerm.toLowerCase();
+    return (
+      work.titulo.toLowerCase().includes(term) ||
+      work.autor.toLowerCase().includes(term) ||
+      work.palavrasChave.some(kw => kw.toLowerCase().includes(term))
+    );
+  });
+
   return (
     <div className="space-y-8">
       {/* Estatísticas */}
       <CacheStatsCard stats={stats} />
+
+      {/* Tabs para Cache e Indexed */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="flex gap-8">
+          <button
+            onClick={() => setActiveTab('cache')}
+            className={`py-4 px-2 border-b-2 font-medium transition ${
+              activeTab === 'cache'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            💾 Cache do Servidor ({documents.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('indexed')}
+            className={`py-4 px-2 border-b-2 font-medium transition ${
+              activeTab === 'indexed'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            📚 Indexados Localmente ({indexedWorks.length})
+          </button>
+        </div>
+      </div>
 
       {/* Ações */}
       <div className="flex gap-4 items-center">
@@ -432,12 +472,14 @@ const CacheTab: React.FC<CacheTabProps> = ({ apiUrl }) => {
           🔄 Recarregar
         </button>
         
-        <button
-          onClick={handleClearCache}
-          className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition"
-        >
-          🗑️ Limpar Cache
-        </button>
+        {activeTab === 'cache' && (
+          <button
+            onClick={handleClearCache}
+            className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition"
+          >
+            🗑️ Limpar Cache
+          </button>
+        )}
 
         <div className="flex-1"></div>
 
@@ -454,25 +496,85 @@ const CacheTab: React.FC<CacheTabProps> = ({ apiUrl }) => {
         </div>
       </div>
 
-      {/* Lista de documentos */}
-      {filteredDocs.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-lg shadow-md">
-          <FileTextIcon className="inline opacity-30 mb-4" size={64} />
-          <p className="text-lg text-gray-600">
-            {searchTerm ? 'Nenhum documento encontrado' : 'Cache vazio'}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {filteredDocs.map((doc) => (
-            <CachedDocumentCard
-              key={doc.doc_hash}
-              doc={doc}
-              onView={setSelectedDoc}
-              onDelete={handleDeleteDocument}
-            />
-          ))}
-        </div>
+      {/* Cache Tab */}
+      {activeTab === 'cache' && (
+        <>
+          {filteredDocs.length === 0 ? (
+            <div className="text-center py-20 bg-white rounded-lg shadow-md">
+              <FileTextIcon className="inline opacity-30 mb-4" size={64} />
+              <p className="text-lg text-gray-600">
+                {searchTerm ? 'Nenhum documento encontrado' : 'Cache vazio'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {filteredDocs.map((doc) => (
+                <CachedDocumentCard
+                  key={doc.doc_hash}
+                  doc={doc}
+                  onView={setSelectedDoc}
+                  onDelete={handleDeleteDocument}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Indexed Tab */}
+      {activeTab === 'indexed' && (
+        <>
+          {filteredIndexedWorks.length === 0 ? (
+            <div className="text-center py-20 bg-white rounded-lg shadow-md">
+              <FileTextIcon className="inline opacity-30 mb-4" size={64} />
+              <p className="text-lg text-gray-600">
+                {searchTerm ? 'Nenhum documento encontrado' : 'Nenhum trabalho indexado localmente'}
+              </p>
+              <p className="text-sm text-gray-500 mt-2">Submeta um trabalho na aba de Upload para vê-lo aqui.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {filteredIndexedWorks.map((work) => (
+                <div key={work.id} className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
+                  <div className="flex justify-between items-start mb-2">
+                    <h4 className="text-lg font-semibold text-indigo-600 flex-1">{work.titulo}</h4>
+                    <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
+                      Indexado
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-3">{work.autor} ({work.ano})</p>
+                  
+                  <div className="grid grid-cols-2 gap-2 mb-3 text-xs text-gray-600">
+                    <div><span className="font-semibold">Universidade:</span> {work.universidade}</div>
+                    <div><span className="font-semibold">Supervisor:</span> {work.supervisor}</div>
+                  </div>
+                  
+                  <div className="mb-3">
+                    <span className="font-semibold text-gray-900 text-sm">Palavras-chave:</span>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {work.palavrasChave.slice(0, 3).map((kw, idx) => (
+                        <span key={idx} className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded text-xs">
+                          {kw}
+                        </span>
+                      ))}
+                      {work.palavrasChave.length > 3 && (
+                        <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">
+                          +{work.palavrasChave.length - 3}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">{work.resumo}</p>
+                  
+                  <button className="w-full px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg font-semibold hover:bg-indigo-100 transition">
+                    Ver Detalhes
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Modal de detalhes */}
